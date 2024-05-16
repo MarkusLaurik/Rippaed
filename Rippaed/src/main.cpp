@@ -33,7 +33,7 @@ TFT_eSPI tft = TFT_eSPI();
 #define VREF 3.3 // osund pinge
 #define SCOUNT 30 // mõõtmiste arv
 #define PUMPTIME 5000U // pumba tööaeg
-#define PUMPINTERVAL 30000U // pumba puhke aeg
+#define PUMPINTERVAL 300000U // pumba puhke aeg
 
 XPT2046_Touchscreen ts(CS_PIN, TIRQ_PIN);
 OneWire tempSensor(TEMP_PIN); // temperatuuri anduri defineerimine
