@@ -180,21 +180,37 @@ void setup()
   Serial.print("Connecting to ");
   Serial.println(ssid);
   WiFi.begin(ssid, password);
+  static unsigned long wifiTime = millis();
   while (WiFi.status() != WL_CONNECTED) 
   {
     delay(500);
     Serial.print(".");
+    if(millis()-wifiTime > 30000U)
+    {
+      WiFi.mode(WIFI_OFF);
+      break;
+    }
   }
-  Serial.println("");
-  Serial.println("WiFi connected.");
   
-  // Init and get the time
-  configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
-  printLocalTime();
+  if (WiFi.status() != WL_CONNECTED)
+  {
+    Serial.println("");
+    Serial.println("Could not connect to WiFi");
+  }
+  else
+  {
+    Serial.println("");
+    Serial.println("WiFi connected.");
+  
+    // Serverist aja küsimine
+    configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
+    printLocalTime();
 
-  // WiFi-st lahti ühendamine
-  WiFi.disconnect(true);
-  WiFi.mode(WIFI_OFF);
+    // WiFi-st lahti ühendamine
+    WiFi.disconnect(true);
+    WiFi.mode(WIFI_OFF);
+  }
+  
 
   //tervitus sõnum
   tft.fillRectVGradient(0,0,480,320,TFT_BLACK,TFT_DARKGREEN);
@@ -226,7 +242,7 @@ void setup()
   Serial.println("LAMPS ON");
 
   // pumba sisselülitamine
-  digitalWrite(WTRLVL_PIN, HIGH);
+  digitalWrite(RLY3_PIN, HIGH);
   Serial.println("WATER PUMP ON");
 }
 
@@ -252,6 +268,7 @@ void loop()
     z = p.z;
     printTouchToSerial(x, y, z);
 
+    // kas vajutati pH+ nuppu?
     if ((x > PHPBUTTON_X) && (x < (PHPBUTTON_X + PHPBUTTON_W))) 
     {
         if ((y > (PHPBUTTON_Y)) && (y <= (PHPBUTTON_Y + PHPBUTTON_H))) 
@@ -261,6 +278,8 @@ void loop()
           printPh(pH);
         }
     }
+
+    // kas vajutati pH- nuppu?
     if ((x > PHMBUTTON_X) && (x < (PHMBUTTON_X + PHMBUTTON_W))) 
     {
         if ((y > (PHMBUTTON_Y)) && (y <= (PHMBUTTON_Y + PHMBUTTON_H))) 
@@ -270,6 +289,8 @@ void loop()
           printPh(pH);
         }
     }
+
+    // kas vajutati EC+ nuppu?
     if ((x > ECPBUTTON_X) && (x < (ECPBUTTON_X + ECPBUTTON_W))) 
     {
         if ((y > (ECPBUTTON_Y)) && (y <= (ECPBUTTON_Y + ECPBUTTON_H))) 
@@ -279,6 +300,8 @@ void loop()
           printEc(EC);
         }
     }
+
+    // kas vajutati EC- nuppu?
     if ((x > ECMBUTTON_X) && (x < (ECMBUTTON_X + ECMBUTTON_W))) 
     {
         if ((y > (ECMBUTTON_Y)) && (y <= (ECMBUTTON_Y + ECMBUTTON_H))) 
@@ -288,6 +311,8 @@ void loop()
           printEc(EC);
         }
     }
+
+    // kas vajutati LED nuppu?
     if ((x > LEDBUTTON_X) && (x < (LEDBUTTON_X + LEDBUTTON_W))) 
     {
         if ((y > (LEDBUTTON_Y)) && (y <= (LEDBUTTON_Y + LEDBUTTON_H))) 
@@ -333,10 +358,10 @@ void loop()
    ***********************************************************************************************************/
 
   static unsigned long ecSampleTimepoint = millis();
-  if (millis()-ecSampleTimepoint > 40U)
-  {     //every 40 milliseconds,read the analog value from the ADC
+  if (millis()-ecSampleTimepoint > 300U)
+  {     // iga 300 ms loe analoog väärtus andurist ja salvesta see buffrisse
     ecSampleTimepoint = millis();
-    analogBuffer[analogBufferIndex] = analogRead(TDS_PIN);    //read the analog value and store into the buffer
+    analogBuffer[analogBufferIndex] = analogRead(TDS_PIN);
     analogBufferIndex++;
     if (analogBufferIndex == SCOUNT)
     { 
@@ -352,15 +377,15 @@ void loop()
     {
       analogBufferTemp[copyIndex] = analogBuffer[copyIndex];
       
-      // read the analog value more stable by the median filtering algorithm, and convert to voltage value
+      // leia anduri lugemite mediaan väärtus ning muuda see pingeks
       averageVoltage = getMedianNum(analogBufferTemp,SCOUNT) * (float)VREF / 4096.0;
       
-      //temperature compensation formula: fFinalResult(20^C) = fFinalResult(current)/(1.0+0.02*(fTP-25.0)); 
+      //temperatuuri kompensatsiooni valem: fFinalResult(20^C) = fFinalResult(current)/(1.0+0.02*(fTP-25.0)); 
       float compensationCoefficient = 1.0+0.02*(sensors.getTempCByIndex(0)-25.0);
-      //temperature compensation
+      //temperatuuri kompensatsioon
       float compensationVoltage = averageVoltage / compensationCoefficient;
       
-      //convert voltage value to EC value
+      //muuda pinge EC-ks
       ecValue=(133.42*compensationVoltage*compensationVoltage*compensationVoltage - 255.86*compensationVoltage*compensationVoltage + 857.39*compensationVoltage)*0.002; 
     }
       printSensorEc(ecValue);
@@ -372,9 +397,9 @@ void loop()
   /***********************************************************************************************************
    ***************************************** pH sensor *******************************************************
    ***********************************************************************************************************/
-  // Loetakse 30 väärtust 40ms tagant
+  // Loetakse 30 väärtust 300ms tagant
   static unsigned long pHSampleTimepoint = millis();
-  if (millis()-pHSampleTimepoint > 40U)
+  if (millis()-pHSampleTimepoint > 300U)
   {
     pHSampleTimepoint = millis();
     phBufferArr[phBuffer] = analogRead(PH_PIN);
@@ -411,7 +436,7 @@ void loop()
   static unsigned long elapsedTime2 = millis();
   if (millis()-elapsedTime2 > PUMPINTERVAL)
   {
-    if (ecValue < EC)
+    if (ecValue < EC - 0.1 )
     {
       if (ntPumpstate == false)
       {
@@ -429,46 +454,49 @@ void loop()
     }
   }
   
+  // seatud aja tagant kontrollitakse hetkelist pH taset
   static unsigned long elapsedTime3 = millis();
   if (millis()-elapsedTime3 > PUMPINTERVAL)
   {
-    if (phValue < pH)
+    // kui loetud väärtus jääb väljapoole määratud vahemiku, pumbatakse vastavat lahust juurde.
+    if (phValue < pH - 0.1 || phValue > pH + 0.1)
     {
-      if (ppPumpstate == false)
+      if (phValue < pH)
       {
-        digitalWrite(RLY5_PIN, HIGH);
-        Serial.println("pH+ PUMP ON");
-        ppPumpstate = true;
+        if (ppPumpstate == false)
+        {
+          digitalWrite(RLY5_PIN, HIGH);
+          Serial.println("pH+ PUMP ON");
+          ppPumpstate = true;
+        }
       }
-      if (millis()-elapsedTime3 > PUMPINTERVAL + PUMPTIME)
-      {
-        digitalWrite(RLY5_PIN, LOW);
-        Serial.println("pH+ PUMP OFF");
-        elapsedTime3 = millis();
-        ppPumpstate = false;
-      }
-    }
-  }
 
-  static unsigned long elapsedTime4 = millis();
-  if (millis()-elapsedTime4 > PUMPINTERVAL)
-  {
-    if (phValue > pH)
-    {
-      if (pmPumpstate == false)
+      else if (phValue > pH)
       {
-        digitalWrite(RLY4_PIN, HIGH);
-        Serial.println("pH- PUMP ON");
-        pmPumpstate = true;
-      }
-      if (millis()-elapsedTime4 > PUMPINTERVAL + PUMPTIME)
-      {
-        digitalWrite(RLY4_PIN, LOW);
-        Serial.println("pH- PUMP OFF");
-        elapsedTime4 = millis();
-        pmPumpstate = false;
+        if (pmPumpstate == false)
+        {
+          digitalWrite(RLY4_PIN, HIGH);
+          Serial.println("pH- PUMP ON");
+          pmPumpstate = true;
+        }
       }
     }
+    //static unsigned long elapsedTime4 = millis();
+    if (millis()-elapsedTime3 > PUMPINTERVAL + PUMPTIME)
+    {
+      digitalWrite(RLY4_PIN, LOW);
+      Serial.println("pH- PUMP OFF");
+      elapsedTime3 = millis();
+      pmPumpstate = false;
+    }
+
+    if (millis()-elapsedTime3 > PUMPINTERVAL + PUMPTIME)
+    {
+      digitalWrite(RLY5_PIN, LOW);
+      Serial.println("pH+ PUMP OFF");
+      elapsedTime3 = millis();
+      ppPumpstate = false;
+    } 
   }
 
   /***********************************************************************************************************
@@ -480,7 +508,7 @@ void loop()
   int state = mySwitch.getState();
   if (state == LOW && wPumpState == false)
   {
-    digitalWrite(14, HIGH);
+    digitalWrite(RLY3_PIN, HIGH);
     wPumpState = true;
     Serial.println("WATER PUMP ON");
     tft.fillRect(265, 145, 95, 95, TFT_BLACK);
@@ -488,7 +516,7 @@ void loop()
   else if (state == HIGH && wPumpState == true)
   {
     delay(5000);
-    digitalWrite(14, LOW);
+    digitalWrite(RLY3_PIN, LOW);
     wPumpState = false;
     Serial.println("WATER PUMP OFF");
     drawWtrButton();
@@ -626,13 +654,12 @@ void drawWtrButton()
 // Prindi puute kordinaadid ja tugevus Serial Monitori
 void printTouchToSerial(int touchX, int touchY, int touchZ) 
 {
-  Serial.print("X = ");
+  /*Serial.print("X = ");
   Serial.print(touchX);
   Serial.print(" | Y = ");
   Serial.print(touchY);
   Serial.print(" | Pressure = ");
-  Serial.print(touchZ);
-  Serial.println();
+  Serial.print(touchZ);*/
 }
 
 void printPh(float savedPh)
